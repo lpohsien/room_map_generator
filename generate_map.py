@@ -14,9 +14,14 @@ from PIL import Image
 from collections import deque
 from typing import Tuple, List
 
+WALL_COLOR = np.array([255, 255, 255], dtype=np.uint8)  # White
+FREE_COLOR = np.array([0, 0, 0], dtype=np.uint8)        # Black
+# Value channel for the value map
 RED = np.array([255, 0, 0], dtype=np.uint8)
 GREEN = np.array([0, 255, 0], dtype=np.uint8)
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
+VALUE_CHANNEL = 2
+
 
 class ImagePoint:
 
@@ -37,11 +42,23 @@ class ImagePoint:
             self.r = index[0]
             self.c = index[1]
 
-    def distance_to(self, p: 'ImagePoint'):
+    def distance_to_point(self, p: 'ImagePoint'):
         a = np.array([self.r, self.c])
         b = np.array([p.r, p.c])
         return np.linalg.norm(a-b)
+    
+    def distance_to_index(self, index: tuple[int, int]):
+        a = np.array([self.r, self.c])
+        b = np.array(index)
+        return np.linalg.norm(a-b)
         
+    def distance_to_coords(self, coords: tuple[int, int]):
+        a = np.array([self.x, self.y])
+        b = np.array(coords)
+        return np.linalg.norm(a-b)
+    
+    def __repr__(self):
+        return f"ImagePoint(r={self.r}, c={self.c}, x={self.x}, y={self.y})"
 
 class OccupancyGridGenerator:
     """
@@ -72,8 +89,8 @@ class OccupancyGridGenerator:
         self.grid = np.zeros((self.height, self.width, 3), dtype=np.uint8)
 
         # Color constants
-        self.FREE_COLOR = np.array([255, 255, 255], dtype=np.uint8)  # White
-        self.WALL_COLOR = np.array([0, 0, 0], dtype=np.uint8)        # Black
+        self.FREE_COLOR = FREE_COLOR
+        self.WALL_COLOR = WALL_COLOR
     
     def generate_map(self, plot_type: str, thickness: int, 
                      min_room_area: int, density: float) -> np.ndarray:
@@ -366,7 +383,7 @@ class OccupancyGridGenerator:
                         if connected_j:
                             continue
 
-                        distance = centroids[i].distance_to(centroids[j])
+                        distance = centroids[i].distance_to_point(centroids[j])
                         if distance < min_distance:
                             min_distance = distance
                             best_connection = (i, j)
@@ -423,18 +440,51 @@ class OccupancyGridGenerator:
     def _reached_target_density(self, target_count: int) -> bool:
         wall_mask = np.all(self.grid == self.WALL_COLOR, axis=-1)
         return np.count_nonzero(wall_mask) >= target_count
+    
+    def generate_value_map(self, num_value_points: int = 5, radius: int = 10, vref: int = 10) -> tuple[np.ndarray, np.ndarray]:
+        """Add a point of interest to the map."""
+        assert radius > 0, "Radius must be greater than 0"
 
-    def save_png(self, filepath: str):
-        """Save the occupancy grid as a PNG image."""
-        image = Image.fromarray(self.grid)
-        image.save(filepath)
-        print(f"Map saved to {filepath}")
+        free_space_mask = np.all(self.grid == self.FREE_COLOR, axis=-1)
+        freeIndices = list(np.argwhere(free_space_mask).tolist())
+
+        random.shuffle(freeIndices)
+        points_of_interest = list(map(lambda idx: ImagePoint(index=idx), freeIndices[:num_value_points]))
+        value_map = np.zeros_like(self.grid, dtype=np.float64)
+
+        # compute value for each free pixel based on distance to points of interest
+        for (r, c) in freeIndices:
+            if not np.all(self.grid[r, c] == self.FREE_COLOR): continue # Only consider free space
+            for point in points_of_interest:
+                if point.distance_to_index((r, c)) > radius: 
+                    continue # point of interest is out of range
+                value_map[r, c, VALUE_CHANNEL] += (radius - point.distance_to_index((r, c))) / radius * vref
+
+        # Normalize value map to [0, 255]
+        value_map = (value_map / np.max(value_map) * 255).astype(np.uint8)
+
+        # Set the 3rd channel of free space pixels to the value map
+        self.grid[free_space_mask, VALUE_CHANNEL] = value_map[free_space_mask, VALUE_CHANNEL]
+
+        return self.grid.copy(), value_map.copy()
+
+def save_png(map: np.ndarray, filepath: str):
+    """Save the occupancy grid as a PNG image."""
+    image = Image.fromarray(map)
+    image.save(filepath)
+    print(f"Map saved to {filepath}")
 
 
-def output_map(width: int, height: int, plot_type: str, 
-               thickness: int, min_room_area: int, density: float,
+def output_map(width: int, 
+               height: int, 
+               plot_type: str, 
+               thickness: int, 
+               min_room_area: int, 
+               density: float,
                seed: int | None = None,
-               output_path: str | None = None) -> tuple[np.ndarray, int]:
+               num_value_points: int = 10,
+               radius_of_interest: int = 10,
+               output_path: str | None = None) -> tuple[np.ndarray, np.ndarray, int]:
     """
     Generate and save an occupancy grid map.
     
@@ -453,11 +503,14 @@ def output_map(width: int, height: int, plot_type: str,
     """
     generator = OccupancyGridGenerator(width, height, seed)
     occupancy_grid = generator.generate_map(plot_type, thickness, min_room_area, density)
+    occupancy_grid, value_map = generator.generate_value_map(num_value_points, radius_of_interest, 10)
     if output_path == None:
         from datetime import datetime
         output_path = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-    generator.save_png(output_path)
-    return occupancy_grid, generator.seed
+    save_png(value_map, output_path.replace('.png', '_value.png'))
+    save_png(occupancy_grid, output_path)
+
+    return occupancy_grid, value_map, generator.seed
 
 
 def main():
