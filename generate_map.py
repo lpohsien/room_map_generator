@@ -117,8 +117,9 @@ class OccupancyGridGenerator:
         self._postprocess_map(min_room_area, thickness)
 
         # Add back the margin as walls
-        self.grid = np.pad(self.grid, ((self.margin, self.margin), (self.margin, self.margin), (0, 0)),
-                           mode='constant', constant_values=0)
+        padded_grid = np.full((self.height + self.margin * 2, self.width + self.margin * 2, 3), fill_value=WALL_COLOR, dtype=np.uint8)
+        padded_grid[self.margin:-self.margin, self.margin:-self.margin] = self.grid
+        self.grid = padded_grid
 
         return self.grid.copy()
     
