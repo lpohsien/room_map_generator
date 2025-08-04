@@ -500,7 +500,7 @@ class OccupancyGridGenerator:
         value_map = (value_map / np.max(value_map) * 255).astype(np.uint8)
 
         # Set the 3rd channel of free space pixels to the value map
-        self.grid[free_space_mask, VALUE_CHANNEL] = value_map[free_space_mask, VALUE_CHANNEL]
+        # self.grid[free_space_mask, VALUE_CHANNEL] = value_map[free_space_mask, VALUE_CHANNEL]
 
         return self.grid.copy(), value_map.copy()
 
@@ -543,7 +543,7 @@ def output_map(width: int,
     if output_path == None:
         from datetime import datetime
         output_path = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-    # save_png(value_map, output_path.replace('.png', '_value.png'))
+    save_png(value_map, output_path.replace('.png', '_value.png'))
     save_png(occupancy_grid, output_path)
 
     return occupancy_grid, value_map, generator.seed
