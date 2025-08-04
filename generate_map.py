@@ -14,7 +14,7 @@ from collections import deque
 from typing import Tuple, List
 
 WALL_COLOR = np.array([255, 255, 255], dtype=np.uint8)  # White
-FREE_COLOR = np.array([0, 0, 0], dtype=np.uint8)        # Black
+FREE_COLOR = np.array([50, 50, 50], dtype=np.uint8)        # Black
 # Value channel for the value map
 RED = np.array([255, 0, 0], dtype=np.uint8)
 GREEN = np.array([0, 255, 0], dtype=np.uint8)
