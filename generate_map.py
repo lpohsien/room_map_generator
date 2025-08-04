@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Randomized Occupancy Grid Map Generator
 
@@ -21,7 +20,6 @@ RED = np.array([255, 0, 0], dtype=np.uint8)
 GREEN = np.array([0, 255, 0], dtype=np.uint8)
 BLUE = np.array([0, 0, 255], dtype=np.uint8)
 VALUE_CHANNEL = 2
-
 
 class ImagePoint:
 
@@ -91,6 +89,7 @@ class OccupancyGridGenerator:
         # Color constants
         self.FREE_COLOR = FREE_COLOR
         self.WALL_COLOR = WALL_COLOR
+
     
     def generate_map(self, plot_type: str, thickness: int, 
                      min_room_area: int, density: float) -> np.ndarray:
@@ -298,7 +297,7 @@ class OccupancyGridGenerator:
         
         # Find connected components of free space
         components = self._find_connected_components(is_free)
-        
+
         # Separate large and small components
         large_components = []
         for component_mask in components:
@@ -312,6 +311,13 @@ class OccupancyGridGenerator:
         
         # Connect large components with corridors
         self._connect_components_with_corridors(large_components, corridor_thickness)
+
+        # Expand paths that are too small
+        for cy in range(self.height):
+            for cx in range(self.width):
+                if np.all(self.grid[cy, cx, :] == self.WALL_COLOR): continue
+                self._expand_pixel_horizontal(cx, cy, corridor_thickness)
+                self._expand_pixel_vertical(cx, cy, corridor_thickness)
 
     
     def _find_connected_components(self, binary_mask: np.ndarray) -> List[np.ndarray]:
@@ -337,6 +343,7 @@ class OccupancyGridGenerator:
                             
                             if (0 <= nx < self.width and 0 <= ny < self.height and
                                 binary_mask[ny, nx] and not visited[ny, nx]):
+
                                 visited[ny, nx] = True
                                 component_mask[ny, nx] = True
                                 queue.append((nx, ny))
@@ -344,6 +351,34 @@ class OccupancyGridGenerator:
                     components.append(component_mask)
         
         return components
+    
+    def _expand_pixel_horizontal(self, cx: int, cy: int, thickness: int):
+        # expand the path if it is too narrow
+        start, end = max(0, cx - thickness + 1), min(self.width, cx + thickness)
+        # produce sliding windows of length thickness that contains pixel at cx, shape: [num_windows, thickness, 3]
+        window = np.lib.stride_tricks.sliding_window_view(self.grid[cy, start:end, :].reshape((-1, 3)), (thickness, 3))[:,0]
+        # for each sliding window of length thickness, check if all the pixels in the window are free colour
+        # if any of the window (of size thickness) contains all free colors, then the path at cx is wide enough, otherwise expand
+        if np.all(np.any(np.all(window == self.WALL_COLOR, axis=-1), axis=-1)):
+            start = int(max(0, cx - np.ceil(thickness/2) + 1))
+            if start + thickness > self.width:
+                start = self.width - thickness
+            self.grid[cy, start:start+thickness, :] = self.FREE_COLOR
+            # self.grid[cy, cx, :] = RED
+
+    def _expand_pixel_vertical(self, cx: int, cy: int, thickness: int):
+        # expand the path if it is too narrow
+        start, end = max(0, cy - thickness + 1), min(self.height, cy + thickness)
+        # produce sliding windows of length thickness that contains pixel at cx, shape: [num_windows, thickness, 3]
+        window = np.lib.stride_tricks.sliding_window_view(self.grid[start:end, cx, :].reshape((-1, 3)), (thickness, 3))[:,0]
+        # for each sliding window of length thickness, check if all the pixels in the window are free colour
+        # if any of the window (of size thickness) contains all free colors, then the path at cx is wide enough, otherwise expand
+        if np.all(np.any(np.all(window == self.WALL_COLOR, axis=-1), axis=-1)):
+            start = int(max(0, cy - np.ceil(thickness/2) + 1))
+            if start + thickness > self.height:
+                start = self.height - thickness
+            self.grid[start:start+thickness, cx, :] = self.FREE_COLOR
+            # self.grid[cy, cx, :] = RED
 
     def _connect_components_with_corridors(self, components: List[np.ndarray], corridor_thickness: int):
         """Connect disconnected components with corridors."""
@@ -508,7 +543,7 @@ def output_map(width: int,
     if output_path == None:
         from datetime import datetime
         output_path = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-    save_png(value_map, output_path.replace('.png', '_value.png'))
+    # save_png(value_map, output_path.replace('.png', '_value.png'))
     save_png(occupancy_grid, output_path)
 
     return occupancy_grid, value_map, generator.seed
@@ -521,11 +556,11 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument('--width', type=int, default=512,
+    parser.add_argument('--width', type=int, default=100,
                        help='Pixel width of the output image')
-    parser.add_argument('--height', type=int, default=512,
+    parser.add_argument('--height', type=int, default=100,
                        help='Pixel height of the output image')
-    parser.add_argument('--seed', type=int, default=None,
+    parser.add_argument('--seed', type=int, default=0,
                        help='Random seed for reproducibility')
     parser.add_argument('--plot_type', choices=['rooms', 'tunnels'], default='rooms',
                        help='Map generation mode')
@@ -558,7 +593,7 @@ def main():
     print(f"Min room area: {args.min_room_area}")
     print(f"Target density: {args.density}")
     
-    occupancy_grid, seed = output_map(
+    occupancy_grid, value_map, seed = output_map(
         width=args.width,
         height=args.height,
         plot_type=args.plot_type,
